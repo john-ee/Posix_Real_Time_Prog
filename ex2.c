@@ -1,9 +1,9 @@
 #include <unistd.h>
 #include <stdio.h>
-#include <sys/types.h>
-#include <sys/wait.h>
+//#include <sys/types.h>
+//#include <sys/wait.h>
 #include <signal.h>
-#include <errno.h>
+//#include <errno.h>
 #include <stdlib.h>
 #include <time.h>
 #include <sched.h>
@@ -21,6 +21,16 @@ int pid;
 
 int main(int argc, char const *argv[]) {
 
+  struct timespec ref;
+  clock_gettime(CLOCK_REALTIME, &ref);
+  double t = (double)ref.tv_sec*1e9 + (double)ref.tv_nsec;
+  int k = 0;
+  while (((double)ref.tv_sec*1e9 + (double)ref.tv_nsec)<t+1e6) {
+    clock_gettime(CLOCK_REALTIME, &ref);
+    k++;
+  }
+
+  printf("k = %d\n", k);
 
   if ( (pid=fork()) == -1 ) {
     perror("fork");
