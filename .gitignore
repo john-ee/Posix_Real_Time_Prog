@@ -1,1 +1,4 @@
 *.pdf
+compile.sh
+a.out
+exemple_timer.c
