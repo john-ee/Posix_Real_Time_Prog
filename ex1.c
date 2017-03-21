@@ -22,9 +22,9 @@ void notify() {
   clock_gettime(CLOCK_REALTIME, &current_time);
   //char * readable = ctime(&current_time.tv_sec);
 
-	printf("[Period %d] T = %ld s + %ld ns\n", compteur,
+	printf("[Period %d]\tT = %ld s + %ld ns\n", compteur,
     current_time.tv_sec - start_time.tv_sec,
-    current_time.tv_nsec);
+    current_time.tv_nsec - start_time.tv_nsec);
   compteur++;
 }
 
@@ -75,9 +75,8 @@ int main(int argc, char const *argv[]) {
   /* démarage après 1 sec. */
   new_setting.it_value.tv_nsec = 0;
   new_setting.it_interval.tv_sec = 1;
+  // expiration toutes les s
   new_setting.it_interval.tv_nsec = 0;
-  /* expiration toutes les
-  1 000 000 nanosec. */
   ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
   if (ret == -1) {
     perror("timer_settime");
