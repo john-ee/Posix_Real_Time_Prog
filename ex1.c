@@ -11,20 +11,34 @@
 #define SIG SIGRTMIN
 #define TIMER 30
 #define PRIORITY_F 17
-#define COUNT_LIMIT 10
+#define COUNT_LIMIT 30
 
-int compteur;
+int compteur = 0;
+timer_t created_timer;
+struct timespec current_time;
+struct timespec start_time;
 
 void notify() {
+  clock_gettime(CLOCK_REALTIME, &current_time);
+  //char * readable = ctime(&current_time.tv_sec);
+
+	printf("[Period %d] T = %ld s + %ld ns\n", compteur,
+    current_time.tv_sec - start_time.tv_sec,
+    current_time.tv_nsec);
   compteur++;
-	printf("Period nb %d just finished\n", compteur);
 }
 
-void alarm_handler() {
-	exit(0);
-}
 
 int main(int argc, char const *argv[]) {
+
+  sigset_t mask;
+  printf("Blocking signal %d\n", SIG);
+  sigemptyset(&mask);
+  sigaddset(&mask, SIG);
+  if (sigprocmask(SIG_SETMASK, &mask, NULL) == -1) {
+    perror("sigprocmask");
+    exit(1);
+  }
 
   struct sched_param scheduling_parameters;
   int ret;
@@ -32,15 +46,6 @@ int main(int argc, char const *argv[]) {
   ret = sched_setscheduler(getpid(), SCHED_FIFO, &scheduling_parameters);
   if (ret == -1) {
     perror("sched_setscheduler");
-    exit(1);
-  }
-
-  struct sigaction sa;
-  sa.sa_handler = alarm_handler;
-  sigemptyset (&sa.sa_mask);
-  sa.sa_flags = 0;
-  if (sigaction(SIGALRM, &sa, NULL)) {
-    perror("alarm");
     exit(1);
   }
 
@@ -59,7 +64,7 @@ int main(int argc, char const *argv[]) {
   sev.sigev_signo = SIG;
   sev.sigev_value.sival_ptr = &created_timer;
   /* ID du timer créé */
-  ret = timer_create(CLOCK_REALTIME, NULL, &created_timer);
+  ret = timer_create(CLOCK_REALTIME, &sev, &created_timer);
   if (ret == -1) {
     perror("timer_create");
     exit(1);
@@ -69,8 +74,8 @@ int main(int argc, char const *argv[]) {
   new_setting.it_value.tv_sec = 1;
   /* démarage après 1 sec. */
   new_setting.it_value.tv_nsec = 0;
-  new_setting.it_interval.tv_sec = 0;
-  new_setting.it_interval.tv_nsec = 1000000;
+  new_setting.it_interval.tv_sec = 1;
+  new_setting.it_interval.tv_nsec = 0;
   /* expiration toutes les
   1 000 000 nanosec. */
   ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
@@ -78,9 +83,15 @@ int main(int argc, char const *argv[]) {
     perror("timer_settime");
     exit(1);
   }
-  //alarm(TIMER);
-  while(compteur < COUNT_LIMIT) {
 
+  clock_gettime(CLOCK_REALTIME, &start_time);
+  while(compteur < COUNT_LIMIT) {
+    sigsuspend(&sa1.sa_mask);
+  }
+
+  if (timer_delete(created_timer) == -1) {
+    perror("timer_delete");
+    exit(1);
   }
   return 0;
 }
