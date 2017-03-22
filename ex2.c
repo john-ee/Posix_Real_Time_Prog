@@ -10,11 +10,14 @@
 
 #define SIG_F SIGRTMIN+1
 #define SIG_C SIGRTMIN+2
+#define SIG_KILL SIGRTMIN+3
 #define TIMER 4
 #define PRIORITY_F 3
 #define PRIORITY_C 2
 #define CHARGE_F 2
 #define CHARGE_C 4
+#define PERIODE_F 4
+#define PERIODE_C 6
 
 
 int pid;
@@ -23,41 +26,46 @@ int compteur = 0;
 int charge = 0;
 struct timespec start_time;
 struct timespec end_time;
+struct timespec exec;
 
 static void handler(int sig, siginfo_t *si, void *uc)
 {
   if (sig == SIGALRM && pid != 0) {
-    kill(pid,SIGUSR2);
+    kill(pid,SIG_KILL);
   	wait(NULL);
   	exit(0);
   }
-  if (sig == SIGUSR2 && pid == 0) {
+  if (sig == SIG_KILL && pid == 0) {
     exit(0);
   }
 
-  int i = 0;
-  clock_gettime(TIMER_ABSTIME, &start_time);
-  if (pid) {
-    printf("Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
-  }
   else {
-    printf("\tStart T2 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
-  }
-  while (i<k_final*charge) {
-    clock_gettime(TIMER_ABSTIME, NULL);
-    i++;
-  }
-  clock_gettime(TIMER_ABSTIME, &end_time);
+    int i = 0;
+    clock_gettime(TIMER_ABSTIME, &start_time);
+    if (pid) {
+      printf("Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+    }
+    else {
+      printf("\tStart T2 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+    }
+    while (i<k_final*charge) {
+      clock_gettime(TIMER_ABSTIME, &exec);
+      i++;
+    }
+    clock_gettime(TIMER_ABSTIME, &end_time);
 
-  if (pid) {
-    printf("End T1 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
-    printf("Duration T1 %ld ns\n", end_time.tv_nsec - start_time.tv_nsec);
-  }
+    if (pid) {
+      printf("End T1 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+      printf("Duration T1 %ld ns\n", end_time.tv_nsec - start_time.tv_nsec);
+    }
 
-  else {
+    else {
 
-    printf("\tEnd T2 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
-    printf("\tDuration T2 %ld ns\n", end_time.tv_nsec - start_time.tv_nsec);
+      printf("\tEnd T2 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+      printf("\tDuration T2 %ld ns\n", end_time.tv_nsec - start_time.tv_nsec);
+    }
+    fflush(stdout);
+    compteur++;
   }
 }
 
@@ -129,18 +137,13 @@ int main(int argc, char const *argv[])
 		perror("SIGALRM");
 		exit(1);
 	}
-  if (sigaction(SIGUSR2, &sa, NULL)) {
-		perror("SIGUSR2");
+  if (sigaction(SIG_KILL, &sa, NULL)) {
+		perror("SIG_KILL");
 		exit(1);
 	}
 
   struct itimerspec new_setting, old_setting;
-  new_setting.it_value.tv_sec = 1;
-  /* démarage après 1 sec. */
-  new_setting.it_value.tv_nsec = 0;
-  new_setting.it_interval.tv_sec = 0;
-  // expiration toutes les s
-  new_setting.it_interval.tv_nsec = 1000;
+
 
   if ( (pid=fork()) == -1 ) {
     perror("fork");
@@ -150,8 +153,8 @@ int main(int argc, char const *argv[])
 	if(pid) {
     // FATHER
     charge = CHARGE_F;
+
     struct sched_param child_params;
-    int ret;
     child_params.sched_priority = PRIORITY_C;
     ret = sched_setscheduler(pid, SCHED_FIFO, &child_params);
     if (ret == -1) {
@@ -171,6 +174,10 @@ int main(int argc, char const *argv[])
       exit(1);
     }
 
+    new_setting.it_value.tv_sec = 0;
+    new_setting.it_value.tv_nsec = 1000;
+    new_setting.it_interval.tv_sec = 0;
+    new_setting.it_interval.tv_nsec = PERIODE_F * 1000;
     ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
     if (ret == -1) {
       perror("timer_settime");
@@ -205,7 +212,10 @@ int main(int argc, char const *argv[])
       exit(1);
     }
 
-
+    new_setting.it_value.tv_sec = 0;
+    new_setting.it_value.tv_nsec = 1000;
+    new_setting.it_interval.tv_sec = 0;
+    new_setting.it_interval.tv_nsec = PERIODE_C * 1000;
     ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
     if (ret == -1) {
       perror("timer_settime");
