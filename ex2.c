@@ -18,6 +18,7 @@
 #define CHARGE_C 4
 #define PERIODE_F 4
 #define PERIODE_C 6
+#define UNITE 1000000
 
 
 int pid;
@@ -175,9 +176,9 @@ int main(int argc, char const *argv[])
     }
 
     new_setting.it_value.tv_sec = 0;
-    new_setting.it_value.tv_nsec = 1000;
+    new_setting.it_value.tv_nsec = UNITE;
     new_setting.it_interval.tv_sec = 0;
-    new_setting.it_interval.tv_nsec = PERIODE_F * 1000;
+    new_setting.it_interval.tv_nsec = PERIODE_F * UNITE;
     ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
     if (ret == -1) {
       perror("timer_settime");
@@ -213,9 +214,9 @@ int main(int argc, char const *argv[])
     }
 
     new_setting.it_value.tv_sec = 0;
-    new_setting.it_value.tv_nsec = 1000;
+    new_setting.it_value.tv_nsec = UNITE;
     new_setting.it_interval.tv_sec = 0;
-    new_setting.it_interval.tv_nsec = PERIODE_C * 1000;
+    new_setting.it_interval.tv_nsec = PERIODE_C * UNITE;
     ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
     if (ret == -1) {
       perror("timer_settime");
