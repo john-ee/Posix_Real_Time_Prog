@@ -18,7 +18,7 @@
 #define CHARGE_C 4
 #define PERIODE_F 4
 #define PERIODE_C 6
-#define UNITE 1000000
+#define UNIT 1000000
 
 
 int pid;
@@ -44,10 +44,10 @@ static void handler(int sig, siginfo_t *si, void *uc)
     int i = 0;
     clock_gettime(TIMER_ABSTIME, &start_time);
     if (pid) {
-      printf("Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+      printf(" * Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
     }
     else {
-      printf("\tStart T2 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+      printf("\t * Start T2 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
     }
     while (i<k_final*charge) {
       clock_gettime(TIMER_ABSTIME, &exec);
@@ -56,14 +56,17 @@ static void handler(int sig, siginfo_t *si, void *uc)
     clock_gettime(TIMER_ABSTIME, &end_time);
 
     if (pid) {
-      printf("End T1 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
-      printf("Duration T1 %ld ns\n", end_time.tv_nsec - start_time.tv_nsec);
+      printf("   End T1 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+      printf("   Duration T1 %ld s + %ld ns\n",
+        end_time.tv_sec - start_time.tv_sec,
+        end_time.tv_nsec - start_time.tv_nsec);
     }
 
     else {
-
-      printf("\tEnd T2 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
-      printf("\tDuration T2 %ld ns\n", end_time.tv_nsec - start_time.tv_nsec);
+      printf("\t   End T2 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+      printf("\t   Duration T2 %ld s + %ld ns\n",
+        end_time.tv_sec - start_time.tv_sec,
+        end_time.tv_nsec - start_time.tv_nsec);
     }
     fflush(stdout);
     compteur++;
@@ -75,10 +78,10 @@ int calibrage(int tours) {
   struct timespec ref;
   clock_gettime(CLOCK_REALTIME, &ref);
   double t = (double)ref.tv_sec*1e9 + (double)ref.tv_nsec;
-  int k_final = 0;
+  int cal = 0;
   while (((double)ref.tv_sec*1e9 + (double)ref.tv_nsec)<t+1e6) {
     clock_gettime(CLOCK_REALTIME, &ref);
-    k_final++;
+    cal++;
   }
   int k = 0;
   while (i>0) {
@@ -89,18 +92,18 @@ int calibrage(int tours) {
       clock_gettime(CLOCK_REALTIME, &ref);
       k++;
     }
-    if (k<k_final)
-      k_final = k;
+    if (k<cal)
+      cal = k;
     i--;
   }
-  return k_final;
+  return cal;
 }
 
 
 int main(int argc, char const *argv[])
 {
   int k = calibrage(9);
-  printf("Calibrage %d\n",k);
+  int period;
 
   struct sched_param father_params;
   int ret;
@@ -153,8 +156,9 @@ int main(int argc, char const *argv[])
 
 	if(pid) {
     // FATHER
+    printf("Calibrage %d\n",k);
     charge = CHARGE_F;
-
+    period = PERIODE_F;
     struct sched_param child_params;
     child_params.sched_priority = PRIORITY_C;
     ret = sched_setscheduler(pid, SCHED_FIFO, &child_params);
@@ -162,76 +166,50 @@ int main(int argc, char const *argv[])
       perror("sched_setscheduler child");
       exit(1);
     }
-
-    struct sigevent sev;
-    timer_t created_timer;
-    sev.sigev_notify = SIGEV_SIGNAL;
-    sev.sigev_signo = SIG_F;
-    sev.sigev_value.sival_ptr = &created_timer;
-    /* ID du timer créé */
-    ret = timer_create(TIMER_ABSTIME, &sev, &created_timer);
-    if (ret == -1) {
-      perror("timer_create");
-      exit(1);
-    }
-
-    new_setting.it_value.tv_sec = 0;
-    new_setting.it_value.tv_nsec = UNITE;
-    new_setting.it_interval.tv_sec = 0;
-    new_setting.it_interval.tv_nsec = PERIODE_F * UNITE;
-    ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
-    if (ret == -1) {
-      perror("timer_settime");
-      exit(1);
-    }
-
-    sigaddset(&sa.sa_mask, SIG_C);
-    alarm(TIMER);
-    while (1) {
-      sigsuspend(&sa.sa_mask);
-    }
-
-    if (timer_delete(created_timer) == -1) {
-      perror("timer_delete");
-      exit(1);
-    }
-
   }
 
   else {
     // CHILD
     charge = CHARGE_C;
+    period = PERIODE_C;
     struct sigevent sev;
     timer_t created_timer;
     sev.sigev_notify = SIGEV_SIGNAL;
     sev.sigev_signo = SIG_C;
     sev.sigev_value.sival_ptr = &created_timer;
-    /* ID du timer créé */
-    ret = timer_create(TIMER_ABSTIME, &sev, &created_timer);
-    if (ret == -1) {
-      perror("timer_create");
-      exit(1);
-    }
+  }
 
-    new_setting.it_value.tv_sec = 0;
-    new_setting.it_value.tv_nsec = UNITE;
-    new_setting.it_interval.tv_sec = 0;
-    new_setting.it_interval.tv_nsec = PERIODE_C * UNITE;
-    ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
-    if (ret == -1) {
-      perror("timer_settime");
-      exit(1);
-    }
+  struct sigevent sev;
+  timer_t created_timer;
+  sev.sigev_notify = SIGEV_SIGNAL;
+  sev.sigev_signo = SIG_F;
+  sev.sigev_value.sival_ptr = &created_timer;
+  /* ID du timer créé */
+  ret = timer_create(TIMER_ABSTIME, &sev, &created_timer);
+  if (ret == -1) {
+    perror("timer_create");
+    exit(1);
+  }
 
-    sigaddset(&sa.sa_mask, SIG_F);
-    while (1) {
-      sigsuspend(&sa.sa_mask);
-    }
+  new_setting.it_value.tv_sec = 0;
+  new_setting.it_value.tv_nsec = period * UNIT;
+  new_setting.it_interval.tv_sec = 0;
+  new_setting.it_interval.tv_nsec = new_setting.it_value.tv_nsec;
+  ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
+  if (ret == -1) {
+    perror("timer_settime");
+    exit(1);
+  }
 
-    if (timer_delete(created_timer) == -1) {
-      perror("timer_delete");
-      exit(1);
-    }
+  sigaddset(&sa.sa_mask, SIG_C);
+  alarm(TIMER);
+  while (1) {
+    sigsuspend(&sa.sa_mask);
+  }
+
+  if (timer_delete(created_timer) == -1) {
+    perror("timer_delete");
+    exit(1);
   }
 
   return 0;
