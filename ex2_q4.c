@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sched.h>
+#include <sys/mman.h>
+#include <fcntl.h>
 
 #define SIG SIGRTMIN
 #define TIMER 4
@@ -15,6 +17,9 @@
 #define PERIODE_F 4
 #define PERIODE_C 6
 #define UNIT 1000000
+#define NAME "/page"
+#define PAGESIZE 300000
+#define RIGHTS 666
 
 
 int pid;
@@ -25,16 +30,30 @@ timer_t created_timer;
 struct timespec start_time;
 struct timespec end_time;
 struct timespec exec;
+void * area;
+char shm_addr[32];
+int fd;
+
 
 
 static void alarm_handler() {
 
   if (pid) {
    wait(NULL);
-   printf("[T1] %d éxécutions\n", compteur);
+   dprintf(fd, "[T1] %d éxécutions\n", compteur);
+   lseek(fd, 0, SEEK_SET);
+   char buffer[PAGESIZE];
+   if (read(fd, buffer, PAGESIZE) == -1) {
+     perror("reading shared fd");
+     exit(1);
+   }
+   if (write(1, buffer, PAGESIZE) == -1) {
+     perror("Printing buffer from shared fd to terminal");
+     exit(1);
+   }
  }
  else {
-   printf("[T2] %d éxécutions\n", compteur);
+   dprintf(fd, "[T2] %d éxécutions\n", compteur);
  }
 
  if (timer_delete(created_timer) == -1) {
@@ -50,18 +69,18 @@ static void handler()
   int echeance_rate = timer_getoverrun(created_timer);
   if (echeance_rate) {
     if (pid) {
-      printf("T1 -----------------------------> A raté %d echeances\n", echeance_rate);
+      dprintf(fd, "T1 -----------------------------> A raté %d echeances\n", echeance_rate);
     }
     else {
-      printf("T2 -----------------------------> A raté %d echeances\n", echeance_rate);
+      dprintf(fd, "T2 -----------------------------> A raté %d echeances\n", echeance_rate);
     }
   }
   clock_gettime(TIMER_ABSTIME, &start_time);
   if (pid) {
-    printf(" * Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+    dprintf(fd, " * Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
   }
   else {
-    printf("\t * Start T2 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+    dprintf(fd, "\t * Start T2 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
   }
   while (i<k_final*charge) {
     clock_gettime(TIMER_ABSTIME, &exec);
@@ -70,15 +89,15 @@ static void handler()
   clock_gettime(TIMER_ABSTIME, &end_time);
 
   if (pid) {
-    printf("   End T1 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
-    printf("   Duration T1 %ld s + %ld ns\n",
+    dprintf(fd, "   End T1 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+    dprintf(fd, "   Duration T1 %ld s + %ld ns\n",
       end_time.tv_sec - start_time.tv_sec,
       end_time.tv_nsec - start_time.tv_nsec);
   }
 
   else {
-    printf("\t   End T2 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
-    printf("\t   Duration T2 %ld s + %ld ns\n",
+    dprintf(fd, "\t   End T2 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+    dprintf(fd, "\t   Duration T2 %ld s + %ld ns\n",
       end_time.tv_sec - start_time.tv_sec,
       end_time.tv_nsec - start_time.tv_nsec);
   }
@@ -122,6 +141,12 @@ int main(int argc, char const *argv[])
   struct sigaction sa, s_alarm;
   struct sigevent sev;
   k_final = calibrage(0);
+
+  shm_unlink(NAME);
+  fd = shm_open("/page", O_CREAT | O_RDWR, RIGHTS);
+  if (fd == -1) { perror("shm_open"); exit(1); }
+  area = mmap(0, PAGESIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (area == NULL) { perror("mmap"); exit(1); }
 
   father_params.sched_priority = PRIORITY_F;
   ret = sched_setscheduler(getpid(), SCHED_FIFO, &father_params);
