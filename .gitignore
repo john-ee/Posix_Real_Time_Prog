@@ -2,4 +2,4 @@
 compile.sh
 a.out
 exemple_timer.c
-print.txt
+*.txt

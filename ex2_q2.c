@@ -1,15 +1,12 @@
 #include <unistd.h>
 #include <stdio.h>
-//#include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
-//#include <errno.h>
 #include <stdlib.h>
 #include <time.h>
 #include <sched.h>
 
-#define SIG SIGRTMIN+1
-//#define SIG_C SIGRTMIN+1
+#define SIG SIGRTMIN
 #define TIMER 4
 #define PRIORITY_F 3
 #define PRIORITY_C 2
@@ -50,6 +47,15 @@ static void alarm_handler() {
 static void handler()
 {
   int i = 0;
+  int echeance_rate = timer_getoverrun(created_timer);
+  if (echeance_rate) {
+    if (pid) {
+      printf("T1 -----------------------------> A raté %d echeances\n", echeance_rate);
+    }
+    else {
+      printf("T2 -----------------------------> A raté %d echeances\n", echeance_rate);
+    }
+  }
   clock_gettime(TIMER_ABSTIME, &start_time);
   if (pid) {
     printf(" * Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
@@ -76,7 +82,7 @@ static void handler()
       end_time.tv_sec - start_time.tv_sec,
       end_time.tv_nsec - start_time.tv_nsec);
   }
-  //fflush(stdout);
+  fflush(stdout);
   compteur++;
 }
 
@@ -109,18 +115,16 @@ int calibrage(int tours) {
 
 int main(int argc, char const *argv[])
 {
-  setbuf(stdout, NULL);
   struct sched_param father_params;
   int ret;
   struct itimerspec new_setting;
-  int k = calibrage(0);
   int period;
   struct sigaction sa, s_alarm;
   struct sigevent sev;
-  //sigset_t mask;
+  k_final = calibrage(0);
 
   father_params.sched_priority = PRIORITY_F;
-  ret = sched_setscheduler(0, SCHED_FIFO, &father_params); // 0 à la place de getpid()
+  ret = sched_setscheduler(getpid(), SCHED_FIFO, &father_params);
   if (ret == -1) {
     perror("sched_setscheduler father");
     exit(1);
@@ -149,13 +153,9 @@ int main(int argc, char const *argv[])
     exit(1);
   }
 
-  sev.sigev_notify = SIGEV_SIGNAL;
-  sev.sigev_value.sival_ptr = &created_timer;
-  sev.sigev_signo = SIG;
-
 	if(pid) {
     // FATHER
-    printf("Calibrage %d\n",k);
+    printf("Calibrage %d\n",k_final);
     charge = CHARGE_F;
     period = PERIODE_F;
 
@@ -176,6 +176,9 @@ int main(int argc, char const *argv[])
     period = PERIODE_C;
   }
 
+  sev.sigev_notify = SIGEV_SIGNAL;
+  sev.sigev_value.sival_ptr = &created_timer;
+  sev.sigev_signo = SIG;
   /* ID du timer créé */
   ret = timer_create(TIMER_ABSTIME, &sev, &created_timer);
   if (ret == -1) {
@@ -187,13 +190,14 @@ int main(int argc, char const *argv[])
   new_setting.it_value.tv_nsec = period * UNIT;
   new_setting.it_interval.tv_sec = 0;
   new_setting.it_interval.tv_nsec = new_setting.it_value.tv_nsec;
+
+  alarm(TIMER);
   ret = timer_settime(created_timer, 0, &new_setting, NULL);
   if (ret == -1) {
     perror("timer_settime");
     exit(1);
   }
 
-  alarm(TIMER);
   while (1) {
     sigsuspend(&sa.sa_mask);
   }
