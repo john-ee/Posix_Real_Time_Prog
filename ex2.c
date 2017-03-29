@@ -8,8 +8,8 @@
 #include <time.h>
 #include <sched.h>
 
-#define SIG_F SIGRTMIN+1
-#define SIG_C SIGRTMIN+2
+#define SIG SIGRTMIN+1
+//#define SIG_C SIGRTMIN+1
 #define TIMER 4
 #define PRIORITY_F 3
 #define PRIORITY_C 2
@@ -24,49 +24,60 @@ int pid;
 int k_final = 0;
 int compteur = 0;
 int charge = 0;
+timer_t created_timer;
 struct timespec start_time;
 struct timespec end_time;
 struct timespec exec;
 
-static void handler(int sig, siginfo_t *si, void *uc)
+
+static void alarm_handler() {
+
+  if (pid) {
+   wait(NULL);
+   printf("[T1] %d éxécutions\n", compteur);
+ }
+ else {
+   printf("[T2] %d éxécutions\n", compteur);
+ }
+
+ if (timer_delete(created_timer) == -1) {
+   perror("timer_delete");
+   exit(1);
+ }
+  exit(0);
+}
+
+static void handler()
 {
-  if (sig == SIGALRM) {
-    if (pid)
-  	 wait(NULL);
-  	exit(0);
+  int i = 0;
+  clock_gettime(TIMER_ABSTIME, &start_time);
+  if (pid) {
+    printf(" * Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+  }
+  else {
+    printf("\t * Start T2 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+  }
+  while (i<k_final*charge) {
+    clock_gettime(TIMER_ABSTIME, &exec);
+    i++;
+  }
+  clock_gettime(TIMER_ABSTIME, &end_time);
+
+  if (pid) {
+    printf("   End T1 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+    printf("   Duration T1 %ld s + %ld ns\n",
+      end_time.tv_sec - start_time.tv_sec,
+      end_time.tv_nsec - start_time.tv_nsec);
   }
 
   else {
-    int i = 0;
-    clock_gettime(TIMER_ABSTIME, &start_time);
-    if (pid) {
-      printf(" * Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
-    }
-    else {
-      printf("\t * Start T2 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
-    }
-    while (i<k_final*charge) {
-      clock_gettime(TIMER_ABSTIME, &exec);
-      i++;
-    }
-    clock_gettime(TIMER_ABSTIME, &end_time);
-
-    if (pid) {
-      printf("   End T1 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
-      printf("   Duration T1 %ld s + %ld ns\n",
-        end_time.tv_sec - start_time.tv_sec,
-        end_time.tv_nsec - start_time.tv_nsec);
-    }
-
-    else {
-      printf("\t   End T2 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
-      printf("\t   Duration T2 %ld s + %ld ns\n",
-        end_time.tv_sec - start_time.tv_sec,
-        end_time.tv_nsec - start_time.tv_nsec);
-    }
-    //fflush(stdout);
-    compteur++;
+    printf("\t   End T2 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+    printf("\t   Duration T2 %ld s + %ld ns\n",
+      end_time.tv_sec - start_time.tv_sec,
+      end_time.tv_nsec - start_time.tv_nsec);
   }
+  //fflush(stdout);
+  compteur++;
 }
 
 int calibrage(int tours) {
@@ -98,64 +109,55 @@ int calibrage(int tours) {
 
 int main(int argc, char const *argv[])
 {
+  setbuf(stdout, NULL);
   struct sched_param father_params;
   int ret;
+  struct itimerspec new_setting;
+  int k = calibrage(0);
+  int period;
+  struct sigaction sa, s_alarm;
+  struct sigevent sev;
+  //sigset_t mask;
+
   father_params.sched_priority = PRIORITY_F;
-  ret = sched_setscheduler(getpid(), SCHED_FIFO, &father_params);
+  ret = sched_setscheduler(0, SCHED_FIFO, &father_params); // 0 à la place de getpid()
   if (ret == -1) {
     perror("sched_setscheduler father");
     exit(1);
   }
-  int k = calibrage(9);
-  int period;
-
-  // On bloque les deux signaux qu'on utilisera
-  sigset_t mask;
-  sigemptyset(&mask);
-  sigaddset(&mask, SIG_C);
-  sigaddset(&mask, SIG_F);
-  if (sigprocmask(SIG_SETMASK, &mask, NULL) == -1) {
-    perror("sigprocmask");
-    exit(1);
-  }
 
   // On prepare un handler
-  struct sigaction sa;
+
 	sa.sa_sigaction = handler;
 	sigemptyset (&sa.sa_mask);
 	sa.sa_flags = 0;
-	if (sigaction(SIG_F, &sa, NULL)) {
-		perror("SIG_F");
+	if (sigaction(SIG, &sa, NULL)) {
+		perror("SIG");
 		exit(1);
 	}
-  if (sigaction(SIG_C, &sa, NULL)) {
-		perror("SIG_C");
-		exit(1);
-	}
-  if (sigaction(SIGALRM, &sa, NULL)) {
+
+	s_alarm.sa_sigaction = alarm_handler;
+	sigemptyset (&s_alarm.sa_mask);
+	s_alarm.sa_flags = 0;
+  if (sigaction(SIGALRM, &s_alarm, NULL)) {
 		perror("SIGALRM");
 		exit(1);
 	}
-
-  struct itimerspec new_setting, old_setting;
-
 
   if ( (pid=fork()) == -1 ) {
     perror("fork");
     exit(1);
   }
 
-  timer_t created_timer;
-  struct sigevent sev;
   sev.sigev_notify = SIGEV_SIGNAL;
   sev.sigev_value.sival_ptr = &created_timer;
+  sev.sigev_signo = SIG;
 
 	if(pid) {
     // FATHER
     printf("Calibrage %d\n",k);
     charge = CHARGE_F;
     period = PERIODE_F;
-    sigaddset(&sa.sa_mask, SIG_C);
 
     struct sched_param child_params;
     child_params.sched_priority = PRIORITY_C;
@@ -165,15 +167,13 @@ int main(int argc, char const *argv[])
       exit(1);
     }
 
-    sev.sigev_signo = SIG_F;
+    sev.sigev_signo = SIG;
   }
 
   else {
     // CHILD
     charge = CHARGE_C;
     period = PERIODE_C;
-    sev.sigev_signo = SIG_C;
-    sigaddset(&sa.sa_mask, SIG_F);
   }
 
   /* ID du timer créé */
@@ -187,7 +187,7 @@ int main(int argc, char const *argv[])
   new_setting.it_value.tv_nsec = period * UNIT;
   new_setting.it_interval.tv_sec = 0;
   new_setting.it_interval.tv_nsec = new_setting.it_value.tv_nsec;
-  ret = timer_settime(created_timer, 0, &new_setting, &old_setting);
+  ret = timer_settime(created_timer, 0, &new_setting, NULL);
   if (ret == -1) {
     perror("timer_settime");
     exit(1);
@@ -196,11 +196,6 @@ int main(int argc, char const *argv[])
   alarm(TIMER);
   while (1) {
     sigsuspend(&sa.sa_mask);
-  }
-
-  if (timer_delete(created_timer) == -1) {
-    perror("timer_delete");
-    exit(1);
   }
 
   return 0;
