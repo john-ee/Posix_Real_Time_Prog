@@ -116,6 +116,7 @@ int main(int argc, char const *argv[])
 
   father_params.sched_priority = PRIORITY_F;
   ret = sched_setscheduler(getpid(), SCHED_FIFO, &father_params);
+  if (ret == -1) {
     perror("sched_setscheduler father");
     exit(1);
   }
