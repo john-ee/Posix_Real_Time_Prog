@@ -166,8 +166,6 @@ int main(int argc, char const *argv[])
       perror("sched_setscheduler child");
       exit(1);
     }
-
-    sev.sigev_signo = SIG;
   }
 
   else {

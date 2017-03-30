@@ -5,19 +5,27 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sched.h>
+#include <sys/mman.h>
+#include <fcntl.h>
 
 #define SIG SIGRTMIN
 #define TIMER 4
 #define PRIORITY_F 3
 #define PRIORITY_C 2
+#define PRIORITY_C1 1
 #define CHARGE_F 2
 #define CHARGE_C 4
+#define CHARGE_C1 6
 #define PERIODE_F 4
 #define PERIODE_C 6
+#define PERIODE_C1 8
 #define UNIT 1000000
+#define NAME "/page"
+#define PAGESIZE 300000
+#define RIGHTS 666
 
 
-int pid;
+int pid = -1, pid1 = -1;
 int k_final = 0;
 int compteur = 0;
 int charge = 0;
@@ -25,18 +33,37 @@ timer_t created_timer;
 struct timespec start_time;
 struct timespec end_time;
 struct timespec exec;
+void * area;
+char shm_addr[32];
+int fd;
+
 
 
 static void alarm_handler() {
 
   if (pid) {
    wait(NULL);
-   printf("[T1] %d éxécutions\n", compteur);
+   dprintf(fd, "[T1] %d éxécutions\n", compteur);
+   lseek(fd, 0, SEEK_SET);
+   char buffer[PAGESIZE];
+   if (read(fd, buffer, PAGESIZE) == -1) {
+     perror("reading shared fd");
+     exit(1);
+   }
+   if (write(1, buffer, PAGESIZE) == -1) {
+     perror("Printing buffer from shared fd to terminal");
+     exit(1);
+   }
  }
  else {
-   printf("[T2] %d éxécutions\n", compteur);
+   if (pid1) {
+     wait(NULL);
+     dprintf(fd, "[T2] %d éxécutions\n", compteur);
+   }
+   else {
+     dprintf(fd, "[T3] %d éxécutions\n", compteur);
+   }
  }
-
  if (timer_delete(created_timer) == -1) {
    perror("timer_delete");
    exit(1);
@@ -50,20 +77,51 @@ static void handler()
   int echeance_rate = timer_getoverrun(created_timer);
   if (echeance_rate) {
     if (pid) {
-      printf("T1 -----------------------------> A raté %d echeances\n", echeance_rate);
+      dprintf(fd, "T1 -----------------------------> A raté %d echeances\n", echeance_rate);
     }
     else {
-      printf("T2 -----------------------------> A raté %d echeances\n", echeance_rate);
+      if (pid1) {
+        dprintf(fd, "T2 -----------------------------> A raté %d echeances\n", echeance_rate);
+      }
+      else {
+        dprintf(fd, "T3 -----------------------------> A raté %d echeances\n", echeance_rate);
+      }
     }
   }
+
   clock_gettime(TIMER_ABSTIME, &start_time);
   while (i<k_final*charge) {
     clock_gettime(TIMER_ABSTIME, &exec);
     i++;
   }
   clock_gettime(TIMER_ABSTIME, &end_time);
-  compteur++;
+
+  if (pid) {
+    dprintf(fd, " * Start T1 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+    dprintf(fd, "   End T1 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+    dprintf(fd, "   Duration T1 %ld s + %ld ns\n",
+      end_time.tv_sec - start_time.tv_sec,
+      end_time.tv_nsec - start_time.tv_nsec);
+  }
+  else {
+    if (pid1) {
+      dprintf(fd, "\t * Start T2 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+      dprintf(fd, "\t   End T2 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+      dprintf(fd, "\t   Duration T2 %ld s + %ld ns\n",
+        end_time.tv_sec - start_time.tv_sec,
+        end_time.tv_nsec - start_time.tv_nsec);
+    }
+    else {
+      dprintf(fd, "\t\t * Start T3 %ld s + %ld ns\n", start_time.tv_sec, start_time.tv_nsec);
+      dprintf(fd, "\t\t   End T3 %ld s + %ld ns\n", end_time.tv_sec, end_time.tv_nsec);
+      dprintf(fd, "\t\t   Duration T3 %ld s + %ld ns\n",
+        end_time.tv_sec - start_time.tv_sec,
+        end_time.tv_nsec - start_time.tv_nsec);
+    }
+  }
+
   fflush(stdout);
+  compteur++;
 }
 
 int calibrage(int tours) {
@@ -96,12 +154,17 @@ int calibrage(int tours) {
 int main(int argc, char const *argv[])
 {
   struct sched_param father_params;
-  int ret;
+  int ret, period;
   struct itimerspec new_setting;
-  int period;
   struct sigaction sa, s_alarm;
   struct sigevent sev;
   k_final = calibrage(0);
+
+  shm_unlink(NAME);
+  fd = shm_open("/page", O_CREAT | O_RDWR, RIGHTS);
+  if (fd == -1) { perror("shm_open"); exit(1); }
+  area = mmap(0, PAGESIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (area == NULL) { perror("mmap"); exit(1); }
 
   father_params.sched_priority = PRIORITY_F;
   ret = sched_setscheduler(getpid(), SCHED_FIFO, &father_params);
@@ -133,7 +196,7 @@ int main(int argc, char const *argv[])
     exit(1);
   }
 
-	if(pid) {
+	if (pid) {
     // FATHER
     printf("Calibrage %d\n",k_final);
     charge = CHARGE_F;
@@ -152,6 +215,27 @@ int main(int argc, char const *argv[])
     // CHILD
     charge = CHARGE_C;
     period = PERIODE_C;
+
+    if ( (pid1=fork()) == -1 ) {
+      perror("fork");
+      exit(1);
+    }
+
+    if (pid1) {
+      struct sched_param child_params1;
+      child_params1.sched_priority = PRIORITY_C1;
+      ret = sched_setscheduler(pid1, SCHED_FIFO, &child_params1);
+      if (ret == -1) {
+        perror("sched_setscheduler child1");
+        exit(1);
+      }
+    }
+
+    else {
+      // CHILD1
+      charge = CHARGE_C1;
+      period = PERIODE_C1;
+    }
   }
 
   sev.sigev_notify = SIGEV_SIGNAL;
